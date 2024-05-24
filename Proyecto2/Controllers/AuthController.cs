@@ -5,9 +5,8 @@ using ClinicAPI.Data;
 using ClinicAPI.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
-using BCrypt.Net;
-
 
 namespace ClinicAPI.Controllers
 {
@@ -27,7 +26,7 @@ namespace ClinicAPI.Controllers
         [HttpPost("register")]
         public async Task<ActionResult<User>> Register(User user)
         {
-            user.Password = BCrypt.Net.BCrypt.HashPassword(user.Password);
+            user.Password = HashPassword(user.Password);
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
@@ -39,7 +38,7 @@ namespace ClinicAPI.Controllers
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == loginUser.Username);
 
-            if (user == null || !BCrypt.Net.BCrypt.Verify(loginUser.Password, user.Password))
+            if (user == null || !VerifyPassword(loginUser.Password, user.Password))
             {
                 return Unauthorized();
             }
@@ -47,6 +46,26 @@ namespace ClinicAPI.Controllers
             var token = GenerateJwtToken(user);
 
             return Ok(new { token });
+        }
+
+        private string HashPassword(string password)
+        {
+            using (var sha256 = SHA256.Create())
+            {
+                var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
+                var builder = new StringBuilder();
+                foreach (var b in bytes)
+                {
+                    builder.Append(b.ToString("x2"));
+                }
+                return builder.ToString();
+            }
+        }
+
+        private bool VerifyPassword(string enteredPassword, string storedHash)
+        {
+            var hashOfEnteredPassword = HashPassword(enteredPassword);
+            return hashOfEnteredPassword == storedHash;
         }
 
         private string GenerateJwtToken(User user)

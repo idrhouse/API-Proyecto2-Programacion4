@@ -3,57 +3,61 @@ using Microsoft.EntityFrameworkCore;
 using ClinicAPI.Data;
 using ClinicAPI.Models;
 using Microsoft.AspNetCore.Authorization;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace ClinicAPI.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class PatientsController : ControllerBase
+    public class UsersController : ControllerBase
     {
         private readonly ClinicContext _context;
 
-        public PatientsController(ClinicContext context)
+        public UsersController(ClinicContext context)
         {
             _context = context;
         }
 
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Patient>>> GetPatients()
+        public async Task<ActionResult<IEnumerable<User>>> GetUsers()
         {
-            return await _context.Patients.ToListAsync();
+            return await _context.Users.ToListAsync();
         }
 
         [HttpGet("{id}")]
-        public async Task<ActionResult<Patient>> GetPatient(int id)
+        public async Task<ActionResult<User>> GetUser(int id)
         {
-            var patient = await _context.Patients.FindAsync(id);
+            var user = await _context.Users.FindAsync(id);
 
-            if (patient == null)
+            if (user == null)
             {
                 return NotFound();
             }
 
-            return patient;
+            return user;
         }
 
-        [HttpPost]
-        public async Task<ActionResult<Patient>> PostPatient(Patient patient)
+        [HttpPost]        
+        public async Task<ActionResult<User>> PostUser(User user)
         {
-            _context.Patients.Add(patient);
+            _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction("GetPatient", new { id = patient.Id }, patient);
+            return CreatedAtAction("GetUser", new { id = user.Id }, user);
         }
 
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutPatient(int id, Patient patient)
+        [Authorize(Policy = "USER")]
+        public async Task<IActionResult> PutUser(int id, User user)
         {
-            if (id != patient.Id)
+            if (id != user.Id)
             {
                 return BadRequest();
             }
 
-            _context.Entry(patient).State = EntityState.Modified;
+            _context.Entry(user).State = EntityState.Modified;
 
             try
             {
@@ -61,7 +65,7 @@ namespace ClinicAPI.Controllers
             }
             catch (DbUpdateConcurrencyException)
             {
-                if (!PatientExists(id))
+                if (!UserExists(id))
                 {
                     return NotFound();
                 }
@@ -75,24 +79,24 @@ namespace ClinicAPI.Controllers
         }
 
         [HttpDelete("{id}")]
-        [Authorize(Policy = "AdminOnly")]
-        public async Task<IActionResult> DeletePatient(int id)
+        [Authorize(Policy = "ADMIN")]
+        public async Task<IActionResult> DeleteUser(int id)
         {
-            var patient = await _context.Patients.FindAsync(id);
-            if (patient == null)
+            var user = await _context.Users.FindAsync(id);
+            if (user == null)
             {
                 return NotFound();
             }
 
-            _context.Patients.Remove(patient);
+            _context.Users.Remove(user);
             await _context.SaveChangesAsync();
 
             return NoContent();
         }
 
-        private bool PatientExists(int id)
+        private bool UserExists(int id)
         {
-            return _context.Patients.Any(e => e.Id == id);
+            return _context.Users.Any(e => e.Id == id);
         }
     }
 }

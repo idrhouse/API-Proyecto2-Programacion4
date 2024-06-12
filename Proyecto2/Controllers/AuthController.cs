@@ -7,6 +7,8 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 
 namespace ClinicAPI.Controllers
 {
@@ -30,23 +32,32 @@ namespace ClinicAPI.Controllers
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction("GetUser", new { id = user.Id }, user);
+            return Ok(user);
         }
 
-        [HttpPost("login")]
-        public async Task<ActionResult<string>> Login([FromBody] User loginUser)
-        {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == loginUser.Username);
 
-            if (user == null || !VerifyPassword(loginUser.Password, user.Password))
+
+        [HttpPost("login")]
+        public async Task<ActionResult> Login([FromBody] LoginRequest loginRequest)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == loginRequest.Username);
+
+            if (user == null)
             {
-                return Unauthorized();
+                return Unauthorized(new { message = "Invalid Username" });
+            }
+
+            if (!VerifyPassword(loginRequest.Password, user.Password))
+            {
+                return Unauthorized(new { message = "Invalid password" });
             }
 
             var token = GenerateJwtToken(user);
 
             return Ok(new { token });
         }
+
+
 
         private string HashPassword(string password)
         {
@@ -74,11 +85,14 @@ namespace ClinicAPI.Controllers
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
             var claims = new[]
-            {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Username),
-                new Claim("role", user.Role),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-            };
+            {                
+                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new Claim(ClaimTypes.Role, user.Role),
+                new Claim("name", user.Name),
+                new Claim("email", user.Email),
+                new Claim("phone", user.Phone),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+    };
 
             var token = new JwtSecurityToken(
                 issuer: _configuration["Jwt:Issuer"],
@@ -89,5 +103,7 @@ namespace ClinicAPI.Controllers
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
+
+
     }
 }

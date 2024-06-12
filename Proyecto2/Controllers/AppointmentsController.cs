@@ -3,6 +3,10 @@ using Microsoft.EntityFrameworkCore;
 using ClinicAPI.Data;
 using ClinicAPI.Models;
 using Microsoft.AspNetCore.Authorization;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Security.Claims;
 
 namespace ClinicAPI.Controllers
 {
@@ -18,90 +22,181 @@ namespace ClinicAPI.Controllers
         }
 
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Appointment>>> GetAppointments()
+        [Authorize(Policy = "USER")]
+        public async Task<ActionResult<IEnumerable<object>>> GetAppointments()
         {
-            return await _context.Appointments.Include(a => a.Patient).ToListAsync();
-        }
-
-        [HttpGet("{id}")]
-        public async Task<ActionResult<Appointment>> GetAppointment(int id)
-        {
-            var appointment = await _context.Appointments.Include(a => a.Patient).FirstOrDefaultAsync(a => a.Id == id);
-
-            if (appointment == null)
-            {
-                return NotFound();
-            }
-
-            return appointment;
-        }
-
-        [HttpPost]
-        [Authorize(Roles = "USER")]
-        public async Task<ActionResult<Appointment>> PostAppointment(Appointment appointment)
-        {
-            if (await _context.Appointments.AnyAsync(a => a.PatientId == appointment.PatientId && a.Date.Date == appointment.Date.Date))
-            {
-                return BadRequest("Cannot create another appointment for the same patient on the same day.");
-            }
-
-            _context.Appointments.Add(appointment);
-            await _context.SaveChangesAsync();
-
-            // Send confirmation email logic goes here
-
-            return CreatedAtAction("GetAppointment", new { id = appointment.Id }, appointment);
-        }
-
-        [HttpPut("{id}")]
-        [Authorize(Roles = "USER")]
-        public async Task<IActionResult> PutAppointment(int id, Appointment appointment)
-        {
-            if (id != appointment.Id)
-            {
-                return BadRequest();
-            }
-
-            if (appointment.Status == "CANCELADA" && (appointment.Date - DateTime.Now).TotalHours < 24)
-            {
-                return BadRequest("Cannot cancel an appointment less than 24 hours in advance.");
-            }
-
-            _context.Entry(appointment).State = EntityState.Modified;
-
             try
             {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                if (!AppointmentExists(id))
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userIdClaim))
                 {
-                    return NotFound();
+                    return BadRequest("User ID claim not found in token.");
                 }
-                else
-                {
-                    throw;
-                }
-            }
 
-            return NoContent();
+                if (!int.TryParse(userIdClaim, out int userId))
+                {
+                    return BadRequest($"Invalid User ID claim in token: {userIdClaim}");
+                }
+
+                var appointments = await _context.Appointments
+                    .Where(a => a.UserId == userId)
+                    .Select(a => new
+                    {
+                        a.Id,
+                        a.Date,
+                        a.Location,
+                        a.Status,
+                        a.AppointmentType,
+                        User = new { a.UserId, a.User.Name, a.User.Email }
+                    })
+                    .ToListAsync();
+
+                if (appointments == null || appointments.Count == 0)
+                {
+                    return NotFound("No appointments found for the user.");
+                }
+
+                return Ok(appointments);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Error retrieving appointments: {ex.Message}");
+            }
         }
 
+
+
+
+        [HttpGet("admin")]
+        [Authorize(Policy = "ADMIN")]
+        public async Task<ActionResult<IEnumerable<object>>> AdminGetAppointments()
+        {
+            try
+            {
+                var appointments = await _context.Appointments
+                    .Select(a => new
+                    {
+                        a.Id,
+                        a.Date,
+                        a.Location,
+                        a.Status,
+                        a.AppointmentType,
+                        User = new { a.UserId, a.User.Name, a.User.Email }
+                    })
+                    .ToListAsync();
+
+                if (appointments == null || appointments.Count == 0)
+                {
+                    return NotFound("No appointments found.");
+                }
+
+                return Ok(appointments);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Error retrieving appointments: {ex.Message}");
+            }
+        }
+
+
+
+        [HttpPost]
+        [Authorize(Policy = "USER")]
+        public async Task<ActionResult<Appointment>> PostAppointment([FromBody] Appointment appointment)
+        {
+            try
+            {
+                if (!ModelState.IsValid)
+                {
+                    return BadRequest(ModelState);
+                }
+
+                
+                var userExists = await _context.Users.AnyAsync(u => u.Id == appointment.UserId);
+                if (!userExists)
+                {
+                    return BadRequest($"El usuario con Id {appointment.UserId} no existe.");
+                }
+
+                
+                if (appointment.Date.Date == DateTime.Now.Date)
+                {
+                    return BadRequest("No se puede agregar una cita para el mismo día actual.");
+                }
+
+                
+                var existingAppointment = await _context.Appointments
+                    .AnyAsync(a => a.UserId == appointment.UserId && a.Date.Date == appointment.Date.Date);
+                if (existingAppointment)
+                {
+                    return BadRequest("Ya existe una cita para el mismo día.");
+                }
+
+                _context.Appointments.Add(appointment);
+                await _context.SaveChangesAsync();
+
+                return CreatedAtAction(nameof(GetAppointments), new { id = appointment.Id }, appointment);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Error al crear la cita: {ex.Message}");
+            }
+        }
+
+
+
+        [HttpPut("{id}/cancel")]
+        [Authorize(Policy = "USER")]
+        public async Task<IActionResult> CancelAppointment(int id)
+        {
+            try
+            {
+                var appointment = await _context.Appointments.FindAsync(id);
+                if (appointment == null)
+                {
+                    return NotFound("La cita no existe.");
+                }
+
+                
+                if (appointment.Date <= DateTime.Now.AddHours(24))
+                {
+                    return BadRequest("No se puede cancelar la cita con menos de 24 horas de antelación.");
+                }
+
+                appointment.Status = "CANCELADA";
+                await _context.SaveChangesAsync();
+
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Error al cancelar la cita: {ex.Message}");
+            }
+        }
+
+
+
         [HttpDelete("{id}")]
-        [Authorize(Policy = "AdminOnly")]
+        [Authorize(Policy = "ADMIN")]
         public async Task<IActionResult> DeleteAppointment(int id)
         {
-            var appointment = await _context.Appointments.FindAsync(id);
-            if (appointment == null)
+            try
             {
-                return NotFound();
+                var appointment = await _context.Appointments.FindAsync(id);
+                if (appointment == null)
+                {
+                    return NotFound("La cita no existe.");
+                }
+
+                _context.Appointments.Remove(appointment);
+                await _context.SaveChangesAsync();
+
+                return NoContent();
             }
-
-            _context.Appointments.Remove(appointment);
-            await _context.SaveChangesAsync();
-
-            return NoContent();
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Error al eliminar la cita: {ex.Message}");
+            }
         }
 
         private bool AppointmentExists(int id)

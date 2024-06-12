@@ -7,9 +7,17 @@ namespace ClinicAPI.Data
     {
         public ClinicContext(DbContextOptions<ClinicContext> options) : base(options) { }
 
-        public DbSet<Patient> Patients { get; set; }
         public DbSet<Appointment> Appointments { get; set; }
         public DbSet<Branch> Branches { get; set; }
         public DbSet<User> Users { get; set; }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            // Configuración de la relación uno a muchos entre User y Appointment
+            modelBuilder.Entity<Appointment>()
+                .HasOne(a => a.User)
+                .WithMany(u => u.Appointments)
+                .HasForeignKey(a => a.UserId);
+        }
     }
 }
